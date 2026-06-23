@@ -29,28 +29,34 @@ class InventoryHomePage extends StatefulWidget {
 }
 
 class _InventoryHomePageState extends State<InventoryHomePage> {
-  // الذاكرة المؤقتة للأصناف، أصبحت تستقبل أرقاماً وتواريخ للقيام بالعمليات الحسابية
   final List<Map<String, dynamic>> _inventoryItems = [];
 
-  // أجهزة الاستشعار للخانات الخمس
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _quantityController = TextEditingController();
   final TextEditingController _stockAlertController = TextEditingController();
   final TextEditingController _expiryController = TextEditingController();
   final TextEditingController _expiryAlertController = TextEditingController();
 
+  // دالة الإضافة الجديدة (تؤسس سجل الحركات بأول عملية إضافة)
   void _addNewItem() {
     if (_nameController.text.isEmpty || _quantityController.text.isEmpty) {
       return;
     }
 
+    int initialQty = int.tryParse(_quantityController.text) ?? 0;
+    String currentDate = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')} ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+
     setState(() {
       _inventoryItems.add({
         'name': _nameController.text,
-        'quantity': int.tryParse(_quantityController.text) ?? 0,
+        'quantity': initialQty,
         'stockAlert': int.tryParse(_stockAlertController.text) ?? 0,
         'expiryDate': _expiryController.text.isEmpty ? 'Not Set' : _expiryController.text,
         'expiryAlertMonths': int.tryParse(_expiryAlertController.text) ?? 0,
+        // إنشاء سجل الحركات (Transactions) كقائمة داخل الصنف
+        'transactions': [
+          {'date': currentDate, 'type': 'Initial Setup', 'amount': initialQty, 'note': 'Initial Stock Added'}
+        ],
       });
     });
 
@@ -63,7 +69,6 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
     Navigator.pop(context);
   }
 
-  // دالة حسابية لمعرفة ما إذا كان الدواء قريباً من الانتهاء بناءً على الشرط المخصص
   bool _isNearExpiry(String dateStr, int alertMonths) {
     if (dateStr == 'Not Set' || alertMonths == 0) return false;
     DateTime? expDate = DateTime.tryParse(dateStr);
@@ -71,8 +76,153 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
 
     final now = DateTime.now();
     final differenceInDays = expDate.difference(now).inDays;
-    // نعتبر الشهر 30 يوماً للتبسيط الحسابي
     return differenceInDays <= (alertMonths * 30);
+  }
+
+  // نافذة إدارة الصنف (تسجيل الاستهلاك وعرض السجل)
+  void _showItemDetails(int index) {
+    final TextEditingController consumeController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        // نستخدم StatefulBuilder لتحديث النافذة المنبثقة فوراً عند الخصم
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            final item = _inventoryItems[index];
+            final List transactions = item['transactions'];
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 16,
+                right: 16,
+                top: 24,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.75, // أخذ 75% من الشاشة
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // عنوان الدواء والكمية الحالية
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          item['name'].toString().toUpperCase(),
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.teal.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Current Qty: ${item['quantity']}',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 30, thickness: 2),
+                    
+                    // قسم تسجيل الاستهلاك
+                    const Text('Log Consumption (Withdrawal):', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: consumeController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Amount to use (e.g., 50)',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.remove_circle_outline, color: Colors.red),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade400,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                          ),
+                          onPressed: () {
+                            int consumeAmount = int.tryParse(consumeController.text) ?? 0;
+                            if (consumeAmount > 0 && consumeAmount <= item['quantity']) {
+                              String currentDate = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')} ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+                              
+                              // تحديث الكمية الكلية وتحديث السجل
+                              setModalState(() {
+                                item['quantity'] -= consumeAmount;
+                                transactions.insert(0, {
+                                  'date': currentDate,
+                                  'type': 'Withdrawal',
+                                  'amount': consumeAmount,
+                                  'note': 'Used in OR'
+                                });
+                              });
+                              
+                              // تحديث الشاشة الرئيسية بالخلف
+                              setState(() {});
+                              consumeController.clear();
+                            }
+                          },
+                          child: const Text('Withdraw', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                    
+                    const SizedBox(height: 20),
+                    const Text('Transaction History:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 10),
+                    
+                    // عرض سجل الحركات
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: transactions.length,
+                        itemBuilder: (context, tIndex) {
+                          final trans = transactions[tIndex];
+                          final isWithdrawal = trans['type'] == 'Withdrawal';
+                          return Card(
+                            elevation: 1,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: Icon(
+                                isWithdrawal ? Icons.arrow_downward : Icons.arrow_upward,
+                                color: isWithdrawal ? Colors.red : Colors.green,
+                              ),
+                              title: Text(trans['type']),
+                              subtitle: Text(trans['date']),
+                              trailing: Text(
+                                '${isWithdrawal ? '-' : '+'}${trans['amount']}',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: isWithdrawal ? Colors.red : Colors.green,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -106,20 +256,17 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
               itemBuilder: (context, index) {
                 final item = _inventoryItems[index];
                 
-                // استخراج المتغيرات من الذاكرة
                 final int qty = item['quantity'];
                 final int stockAlert = item['stockAlert'];
                 final String expiryDateStr = item['expiryDate'];
                 final int expiryAlertMonths = item['expiryAlertMonths'];
 
-                // فحص الشروط المنطقية للإشعارات
                 final bool isLowStock = qty <= stockAlert;
                 final bool isNearExpiry = _isNearExpiry(expiryDateStr, expiryAlertMonths);
 
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   elevation: 2,
-                  // تلوين إطار البطاقة بالأحمر إذا كان هناك تحذير
                   shape: RoundedRectangleBorder(
                     side: BorderSide(
                       color: (isLowStock || isNearExpiry) ? Colors.red.shade300 : Colors.transparent,
@@ -127,42 +274,45 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: (isLowStock || isNearExpiry) ? Colors.red : Colors.teal,
-                      child: Icon(
-                        (isLowStock || isNearExpiry) ? Icons.warning_amber_rounded : Icons.medical_services,
-                        color: Colors.white,
+                  child: InkWell( // جعل البطاقة قابلة للضغط
+                    onTap: () => _showItemDetails(index), // فتح نافذة التفاصيل عند الضغط
+                    borderRadius: BorderRadius.circular(12),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: (isLowStock || isNearExpiry) ? Colors.red : Colors.teal,
+                        child: Icon(
+                          (isLowStock || isNearExpiry) ? Icons.warning_amber_rounded : Icons.medical_services,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    title: Text(
-                      item['name'],
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text('Expiry: $expiryDateStr'),
-                        // إظهار نصوص التحذير في حال تحقق الشروط
-                        if (isNearExpiry)
-                          const Text('⚠️ Expiring Soon!', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
-                        if (isLowStock)
-                          const Text('⚠️ Low Stock Alert!', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
-                      ],
-                    ),
-                    trailing: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isLowStock ? Colors.red.shade50 : Colors.teal.shade50,
-                        borderRadius: BorderRadius.circular(8),
+                      title: Text(
+                        item['name'],
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                       ),
-                      child: Text(
-                        'Qty: $qty',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isLowStock ? Colors.red : Colors.teal,
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 4),
+                          Text('Expiry: $expiryDateStr'),
+                          if (isNearExpiry)
+                            const Text('⚠️ Expiring Soon!', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                          if (isLowStock)
+                            const Text('⚠️ Low Stock Alert!', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                      trailing: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isLowStock ? Colors.red.shade50 : Colors.teal.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Qty: $qty',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isLowStock ? Colors.red : Colors.teal,
+                          ),
                         ),
                       ),
                     ),
@@ -183,7 +333,6 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                   right: 16,
                   top: 24,
                 ),
-                // إضافة قابلية التمرير (Scrolling) للنافذة لتتسع للخانات الجديدة
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -208,7 +357,7 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                               controller: _quantityController,
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
-                                labelText: 'Current Qty',
+                                labelText: 'Total Qty',
                                 border: OutlineInputBorder(),
                               ),
                             ),
