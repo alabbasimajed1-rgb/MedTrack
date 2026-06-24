@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Required for Clipboard functionality
-import 'package:path_provider/path_provider.dart'; // Required for saving files
+import 'package:path_provider/path_provider.dart'; 
 import 'package:sqflite/sqflite.dart';
+import 'package:share_plus/share_plus.dart'; // مكتبة المشاركة والإيميل
+import 'package:pdf/pdf.dart'; // مكتبة ألوان وخصائص الـ PDF
+import 'package:pdf/widgets.dart' as pw; // مكتبة تصميم الـ PDF
 import 'dart:io';
 import 'dart:async';
 
@@ -59,6 +61,11 @@ class DatabaseHelper {
   Future<int> updateItem(Map<String, dynamic> item) async {
     final db = await instance.database;
     return await db.update('items', item, where: 'id = ?', whereArgs: [item['id']]);
+  }
+
+  Future<int> deleteItem(int id) async {
+    final db = await instance.database;
+    return await db.delete('items', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> insertTransaction(Map<String, dynamic> transaction) async {
@@ -141,50 +148,104 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour}:${now.minute.toString().padLeft(2, '0')}";
   }
 
-  // Function to Export Inventory Report to CSV (Excel compatible)
-  Future<void> _exportInventoryReport() async {
+  // ==========================================
+  // دالة إنشاء ملف الـ PDF والمشاركة
+  // ==========================================
+  Future<void> _exportPdfAndShare() async {
     if (_inventoryItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No data available to export.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No data available to export.')));
       return;
     }
 
-    // Build the CSV String
-    StringBuffer csvBuilder = StringBuffer();
-    csvBuilder.writeln('Item Name,Current Quantity,Stock Alert Threshold,Expiry Date,Expiry Alert (Months)');
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF Document...')));
 
+    // تهيئة مستند PDF
+    final pdf = pw.Document();
+
+    // تجهيز عناوين الجدول
+    final tableHeaders = ['Item Name', 'Total Qty', 'Consumed', 'Remaining', 'Expiry Date'];
+    final tableData = <List<String>>[];
+
+    // جلب البيانات والحسابات لكل صنف
     for (var item in _inventoryItems) {
-      csvBuilder.writeln('"${item['name']}",${item['quantity']},${item['stockAlert']},"${item['expiryDate']}",${item['expiryAlertMonths']}');
+      int itemId = item['id'];
+      int remainingQty = item['quantity'];
+      String expiry = item['expiryDate'];
+
+      List<Map<String, dynamic>> transactions = await DatabaseHelper.instance.getItemTransactions(itemId);
+      int consumedQty = 0;
+      for (var t in transactions) {
+        if (t['type'] == 'Withdrawal') {
+          consumedQty += t['amount'] as int;
+        }
+      }
+      int totalQty = remainingQty + consumedQty;
+
+      // إضافة الصف إلى الجدول
+      tableData.add([
+        item['name'].toString().toUpperCase(),
+        totalQty.toString(),
+        consumedQty.toString(),
+        remainingQty.toString(),
+        expiry,
+      ]);
     }
 
+    // تصميم ورقة الـ PDF
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          return [
+            // الترويسة
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('OR Vault - Inventory Report', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)),
+                  pw.Text('Date: ${_getCurrentDate()}', style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+                ]
+              )
+            ),
+            pw.SizedBox(height: 20),
+            // الجدول
+            pw.TableHelper.fromTextArray(
+              headers: tableHeaders,
+              data: tableData,
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.teal),
+              cellAlignment: pw.Alignment.centerLeft,
+              cellStyle: const pw.TextStyle(fontSize: 11),
+              oddRowDecoration: const pw.BoxDecoration(color: PdfColors.grey100),
+            ),
+            pw.SizedBox(height: 30),
+            // تذييل الصفحة
+            pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text('Generated securely by MedTrack App.', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey)),
+            ),
+          ];
+        },
+      ),
+    );
+
     try {
-      // Save to application private documents directory
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/OR_Inventory_Report.csv');
-      await file.writeAsString(csvBuilder.toString());
+      // حفظ الملف في الذاكرة المؤقتة للهاتف
+      final output = await getTemporaryDirectory();
+      final file = File('${output.path}/OR_Inventory_Report.pdf');
+      await file.writeAsBytes(await pdf.save());
 
-      // Copy to clipboard for easy sharing via WhatsApp or Email instantly
-      await Clipboard.setData(ClipboardData(text: csvBuilder.toString()));
-
-      // Show success alert
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Report Exported!'),
-          content: Text('1. Saved as Excel CSV file inside device storage.\n\n2. Copied to Clipboard! You can now paste it directly into WhatsApp, Email, or Google Sheets.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            )
-          ],
-        ),
+      // استدعاء نافذة المشاركة (إيميل، واتساب، الخ)
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Please find attached the latest OR Inventory Backup Report.',
+        subject: 'OR Inventory Report - ${_getCurrentDate()}',
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export failed: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
     }
   }
 
@@ -216,7 +277,7 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    Expanded(child: TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Quantity', border: OutlineInputBorder()), enabled: !isEditing)),
+                    Expanded(child: TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Quantity', border: OutlineInputBorder()), enabled: true)),
                     const SizedBox(width: 12),
                     Expanded(child: TextField(controller: stockAlertCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock Alert', border: OutlineInputBorder()))),
                   ],
@@ -235,7 +296,7 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                       await DatabaseHelper.instance.updateItem({
                         'id': existingItem['id'],
                         'name': nameCtrl.text,
-                        'quantity': existingItem['quantity'], 
+                        'quantity': int.tryParse(qtyCtrl.text) ?? 0,
                         'stockAlert': int.tryParse(stockAlertCtrl.text) ?? 0,
                         'expiryDate': expiryCtrl.text.isEmpty ? 'Not Set' : expiryCtrl.text,
                         'expiryAlertMonths': int.tryParse(expiryAlertCtrl.text) ?? 0,
@@ -298,10 +359,35 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                         Expanded(child: Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal))),
                         IconButton(
                           icon: const Icon(Icons.edit, color: Colors.blueGrey),
-                          tooltip: 'Edit Item Info',
+                          tooltip: 'Edit Item',
                           onPressed: () {
                             Navigator.pop(context);
                             _showAddOrEditDialog(existingItem: item);
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          tooltip: 'Delete Item',
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Delete Item?'),
+                                content: const Text('Are you sure you want to permanently delete this item and its entire history?'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                                  TextButton(
+                                    onPressed: () async {
+                                      await DatabaseHelper.instance.deleteItem(item['id']);
+                                      Navigator.pop(ctx); 
+                                      Navigator.pop(context); 
+                                      _refreshItems(); 
+                                    },
+                                    child: const Text('Delete', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
                           },
                         ),
                       ],
@@ -364,33 +450,6 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 40)),
-                      icon: const Icon(Icons.analytics),
-                      label: const Text('3-Month Consumption Report'),
-                      onPressed: () {
-                        int totalConsumed = 0;
-                        final now = DateTime.now();
-                        for (var t in transactions) {
-                          if (t['type'] == 'Withdrawal') {
-                            DateTime tDate = DateTime.parse(t['date'].split(' ')[0]);
-                            if (now.difference(tDate).inDays <= 90) {
-                              totalConsumed += t['amount'] as int;
-                            }
-                          }
-                        }
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Consumption Report'),
-                            content: Text('Total withdrawn in the last 90 days:\n\n$totalConsumed units.'),
-                            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 10),
                     const Text('Transaction History:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     const SizedBox(height: 10),
                     Expanded(
@@ -432,12 +491,12 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('MedTrack - OR Vault', style: TextStyle(fontWeight: FontWeight.bold)),
-        // Added the Export Action Button to the AppBar
         actions: [
+          // تم تغيير الأيقونة لتكون أيقونة مشاركة PDF واضحة
           IconButton(
-            icon: const Icon(Icons.file_download, size: 28),
-            tooltip: 'Export Report to Excel CSV',
-            onPressed: _exportInventoryReport,
+            icon: const Icon(Icons.picture_as_pdf, size: 28),
+            tooltip: 'Export & Email PDF Report',
+            onPressed: _exportPdfAndShare,
           ),
         ],
       ),
