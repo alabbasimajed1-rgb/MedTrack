@@ -13,6 +13,8 @@ dependencies:
   sqflite: ^2.3.0
   path_provider: ^2.1.1
   intl: ^0.18.1
+  share_plus: ^6.3.0
+  pdf: ^3.10.8
 
 dev_dependencies:
   flutter_test:
