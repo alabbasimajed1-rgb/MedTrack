@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw; 
 import 'dart:io';
 // ==========================================
+// ==========================================
 // 1. Database Engine (Database Helper)
 // ==========================================
 class DatabaseHelper {
@@ -28,23 +29,23 @@ class DatabaseHelper {
     });
   }
 
-  // تجميع الأصناف في القائمة الرئيسية
+  // Group items by name to show total quantity in the main list
   Future<List<Map<String, dynamic>>> getGroupedItems() async {
     final db = await instance.database;
     return await db.rawQuery('SELECT name, category, SUM(quantity) as totalQty FROM items GROUP BY name ORDER BY name ASC');
   }
 
-  // جلب تفاصيل دفعات صنف معين
+  // Get specific batches for a selected item
   Future<List<Map<String, dynamic>>> getBatches(String name) async {
     final db = await instance.database;
     return await db.query('items', where: 'name = ?', whereArgs: [name]);
   }
 
-  // --- الدالة الجديدة: السحب الذكي (الخصم من الأقدم تاريخاً) ---
+  // --- Smart Withdrawal Function (FIFO: Deduct from the oldest expiry date first) ---
   Future<void> withdrawItemSmart(String itemName, int amountToWithdraw) async {
     final db = await instance.database;
     
-    // جلب جميع الدفعات لهذا الصنف، مرتبة حسب تاريخ الانتهاء (من الأقدم للأحدث)
+    // Fetch all batches for this item, ordered by expiry date (oldest first)
     final batches = await db.query(
       'items', 
       where: 'name = ? AND quantity > 0', 
@@ -55,23 +56,24 @@ class DatabaseHelper {
     int remainingToWithdraw = amountToWithdraw;
 
     for (var batch in batches) {
-      if (remainingToWithdraw <= 0) break; // تم سحب الكمية المطلوبة بالكامل
+      if (remainingToWithdraw <= 0) break; // Withdrawal complete
 
       int currentBatchQty = batch['quantity'] as int;
       int batchId = batch['id'] as int;
 
       if (currentBatchQty <= remainingToWithdraw) {
-        // سحب كل كمية الدفعة
+        // Deduct the entire batch quantity
         await db.update('items', {'quantity': 0}, where: 'id = ?', whereArgs: [batchId]);
         remainingToWithdraw -= currentBatchQty;
       } else {
-        // الدفعة تكفي لتغطية ما تبقى من السحب
+        // Deduct only the required amount from this batch
         await db.update('items', {'quantity': currentBatchQty - remainingToWithdraw}, where: 'id = ?', whereArgs: [batchId]);
-        remainingToWithdraw = 0; // انتهت عملية السحب
+        remainingToWithdraw = 0; // Withdrawal complete
       }
     }
   }
 }
+
 
 // ==========================================
 // 2. Main App UI & Logic
