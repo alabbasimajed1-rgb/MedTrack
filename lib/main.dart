@@ -5,8 +5,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart'; 
 import 'package:pdf/widgets.dart' as pw; 
 import 'dart:io';
-import 'dart:async';
-
 // ==========================================
 // 1. Database Engine (Database Helper)
 // ==========================================
@@ -18,69 +16,60 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('ot_tracker_vault.db'); // New DB for clean structure
+    _database = await _initDB('ot_tracker_v3.db');
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
-    final path = '$dbPath/$filePath';
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase('$dbPath/$filePath', version: 1, onCreate: (db, v) async {
+      await db.execute('CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, quantity INTEGER, stockAlert INTEGER, expiryDate TEXT, expiryAlertMonths INTEGER)');
+      await db.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, itemId INTEGER, date TEXT, type TEXT, amount INTEGER, note TEXT)');
+    });
   }
 
-  Future _createDB(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        stockAlert INTEGER NOT NULL,
-        expiryDate TEXT NOT NULL,
-        expiryAlertMonths INTEGER NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        itemId INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        type TEXT NOT NULL,
-        amount INTEGER NOT NULL,
-        note TEXT,
-        FOREIGN KEY (itemId) REFERENCES items (id) ON DELETE CASCADE
-      )
-    ''');
-  }
-
-  Future<int> insertItem(Map<String, dynamic> item) async {
+  // تجميع الأصناف في القائمة الرئيسية
+  Future<List<Map<String, dynamic>>> getGroupedItems() async {
     final db = await instance.database;
-    return await db.insert('items', item);
+    return await db.rawQuery('SELECT name, category, SUM(quantity) as totalQty FROM items GROUP BY name ORDER BY name ASC');
   }
 
-  Future<int> updateItem(Map<String, dynamic> item) async {
+  // جلب تفاصيل دفعات صنف معين
+  Future<List<Map<String, dynamic>>> getBatches(String name) async {
     final db = await instance.database;
-    return await db.update('items', item, where: 'id = ?', whereArgs: [item['id']]);
+    return await db.query('items', where: 'name = ?', whereArgs: [name]);
   }
 
-  Future<int> deleteItem(int id) async {
+  // --- الدالة الجديدة: السحب الذكي (الخصم من الأقدم تاريخاً) ---
+  Future<void> withdrawItemSmart(String itemName, int amountToWithdraw) async {
     final db = await instance.database;
-    return await db.delete('items', where: 'id = ?', whereArgs: [id]);
-  }
+    
+    // جلب جميع الدفعات لهذا الصنف، مرتبة حسب تاريخ الانتهاء (من الأقدم للأحدث)
+    final batches = await db.query(
+      'items', 
+      where: 'name = ? AND quantity > 0', 
+      whereArgs: [itemName],
+      orderBy: 'expiryDate ASC' 
+    );
 
-  Future<int> insertTransaction(Map<String, dynamic> transaction) async {
-    final db = await instance.database;
-    return await db.insert('transactions', transaction);
-  }
+    int remainingToWithdraw = amountToWithdraw;
 
-  Future<List<Map<String, dynamic>>> getAllItems() async {
-    final db = await instance.database;
-    return await db.query('items', orderBy: 'name ASC');
-  }
+    for (var batch in batches) {
+      if (remainingToWithdraw <= 0) break; // تم سحب الكمية المطلوبة بالكامل
 
-  Future<List<Map<String, dynamic>>> getItemTransactions(int itemId) async {
-    final db = await instance.database;
-    return await db.query('transactions', where: 'itemId = ?', whereArgs: [itemId], orderBy: 'id DESC');
+      int currentBatchQty = batch['quantity'] as int;
+      int batchId = batch['id'] as int;
+
+      if (currentBatchQty <= remainingToWithdraw) {
+        // سحب كل كمية الدفعة
+        await db.update('items', {'quantity': 0}, where: 'id = ?', whereArgs: [batchId]);
+        remainingToWithdraw -= currentBatchQty;
+      } else {
+        // الدفعة تكفي لتغطية ما تبقى من السحب
+        await db.update('items', {'quantity': currentBatchQty - remainingToWithdraw}, where: 'id = ?', whereArgs: [batchId]);
+        remainingToWithdraw = 0; // انتهت عملية السحب
+      }
+    }
   }
 }
 
