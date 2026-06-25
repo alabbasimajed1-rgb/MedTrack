@@ -81,6 +81,11 @@ class DatabaseHelper {
         // Deduct only the required amount from this batch
         await db.update('items', {'quantity': currentBatchQty - remainingToWithdraw}, where: 'id = ?', whereArgs: [batchId]);
         remainingToWithdraw = 0; // Withdrawal complete
+          // --- Function to add a new item to the inventory ---
+  Future<int> insertItem(Map<String, dynamic> row) async {
+    final db = await instance.database;
+    return await db.insert('items', row);
+  }
       }
     }
   }
