@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' hide context; // <--- الحل السحري لتصادم الأسماء
 
 void main() => runApp(const OTTrackerApp());
 
@@ -33,32 +33,28 @@ class DatabaseHelper {
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
-    return await openDatabase(path, version: 1, onCreate: (db, v) async {
+    final dbFilePath = join(dbPath, filePath);
+    return await openDatabase(dbFilePath, version: 1, onCreate: (db, v) async {
       await db.execute('CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, quantity INTEGER, stockAlert INTEGER, expiryDate TEXT, expiryAlertMonths INTEGER)');
       await db.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, itemId INTEGER, date TEXT, type TEXT, amount INTEGER, note TEXT)');
     });
   }
 
-  // --- Insert New Item ---
   Future<int> insertItem(Map<String, dynamic> row) async {
     final db = await instance.database;
     return await db.insert('items', row);
   }
 
-  // --- Group Items ---
   Future<List<Map<String, dynamic>>> getGroupedItems() async {
     final db = await instance.database;
     return await db.rawQuery('SELECT name, category, SUM(quantity) as totalQty FROM items GROUP BY name ORDER BY name ASC');
   }
 
-  // --- Get Batches ---
   Future<List<Map<String, dynamic>>> getBatches(String name) async {
     final db = await instance.database;
     return await db.query('items', where: 'name = ?', whereArgs: [name]);
   }
 
-  // --- Smart Withdrawal (FIFO) ---
   Future<void> withdrawItemSmart(String itemName, int amountToWithdraw) async {
     final db = await instance.database;
     final batches = await db.query('items', where: 'name = ? AND quantity > 0', whereArgs: [itemName], orderBy: 'expiryDate ASC');
@@ -109,6 +105,8 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
     final dbHelper = DatabaseHelper.instance;
     List<Map<String, dynamic>> batches = await dbHelper.getBatches(itemName);
     final withdrawCtrl = TextEditingController();
+
+    if (!context.mounted) return; // حماية إضافية لمنع أخطاء الخادم
 
     showModalBottomSheet(
       context: context,
@@ -208,8 +206,6 @@ class _InventoryHomePageState extends State<InventoryHomePage> {
                 );
               },
             ),
-            
-      // الزر في مكانه الصحيح تماماً
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => const AddItemScreen()));
