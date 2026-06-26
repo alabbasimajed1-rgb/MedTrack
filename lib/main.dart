@@ -13,12 +13,12 @@ class OTTrackerProApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'OT-Tracker Pro',
+      title: 'OT TRACKER PRO',
       theme: ThemeData(
         colorSchemeSeed: const Color(0xFF00796B),
-        scaffoldBackgroundColor: const Color(0xFFF4F7F6), // Soft modern background
+        scaffoldBackgroundColor: const Color(0xFFF4F7F6),
         useMaterial3: true,
-        fontFamily: 'Roboto', // Clean default font
+        fontFamily: 'Roboto',
       ),
       home: const DashboardScreen(),
     );
@@ -54,10 +54,8 @@ class DatabaseHelper {
     return await db.insert('items', row);
   }
 
-  // Edit an existing batch and sync alerts across all batches of the same item
   Future<void> updateBatchFull(int id, String itemName, int qty, String expiry, int stockAlert, int expiryAlertMonths) async {
     final db = await instance.database;
-    // 1. Update the specific batch
     await db.update('items', {
       'quantity': qty,
       'expiryDate': expiry,
@@ -65,14 +63,12 @@ class DatabaseHelper {
       'expiryAlertMonths': expiryAlertMonths
     }, where: 'id = ?', whereArgs: [id]);
     
-    // 2. Sync the new alert settings to all other batches of this item
     await db.update('items', {
       'stockAlert': stockAlert,
       'expiryAlertMonths': expiryAlertMonths
     }, where: 'name = ?', whereArgs: [itemName]);
   }
 
-  // Delete a specific batch
   Future<int> deleteBatch(int id) async {
     final db = await instance.database;
     return await db.delete('items', where: 'id = ?', whereArgs: [id]);
@@ -120,7 +116,7 @@ class DatabaseHelper {
 }
 
 // ==========================================
-// 2. Main Dashboard (Beautiful UI)
+// 2. Main Dashboard (Search & Categories UI)
 // ==========================================
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -129,7 +125,12 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  List<Map<String, dynamic>> _items = [];
+  List<Map<String, dynamic>> _allItems = [];
+  List<Map<String, dynamic>> _filteredItems = [];
+  
+  String _searchQuery = '';
+  String _selectedCategory = 'All';
+  List<String> _categories = ['All'];
 
   @override
   void initState() {
@@ -139,7 +140,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadData() async {
     final data = await DatabaseHelper.instance.getGroupedItems();
-    setState(() => _items = data);
+    
+    // Extract unique categories for the top chips
+    Set<String> uniqueCategories = {'All'};
+    for (var item in data) {
+      String cat = item['category'].toString().trim();
+      if (cat.isNotEmpty && cat != 'null') {
+        uniqueCategories.add(cat);
+      }
+    }
+
+    setState(() {
+      _allItems = data;
+      _categories = uniqueCategories.toList();
+      _applyFilters();
+    });
+  }
+
+  void _applyFilters() {
+    setState(() {
+      _filteredItems = _allItems.where((item) {
+        final matchesSearch = item['name'].toString().toLowerCase().contains(_searchQuery.toLowerCase());
+        final matchesCategory = _selectedCategory == 'All' || item['category'] == _selectedCategory;
+        return matchesSearch && matchesCategory;
+      }).toList();
+    });
   }
 
   Future<void> _generatePdfReport() async {
@@ -150,12 +175,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Inventory Status Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+              pw.Text('OT TRACKER PRO - Inventory Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 20),
               pw.TableHelper.fromTextArray(
                 context: context,
                 headers: ['Item Name', 'Category', 'Quantity', 'Nearest Expiry'],
-                data: _items.map((item) => [
+                data: _filteredItems.map((item) => [
                   item['name'].toString(),
                   item['category'].toString(),
                   item['totalQty'].toString(),
@@ -167,10 +192,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
     );
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'Inventory_Report.pdf');
+    await Printing.sharePdf(bytes: await pdf.save(), filename: 'OT_Tracker_Report.pdf');
   }
 
-  Widget _buildAlertIcons(Map<String, dynamic> item) {
+  // Explicit Text Badges for Alerts
+  Widget _buildExplicitAlerts(Map<String, dynamic> item) {
     int totalQty = item['totalQty'] as int;
     int stockAlert = item['stockAlert'] as int;
     int alertMonths = item['expiryAlertMonths'] as int;
@@ -192,14 +218,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
       } catch (_) {}
     }
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (isLowStock) const Tooltip(message: 'Low Stock', child: Icon(Icons.warning_rounded, color: Colors.redAccent, size: 22)),
-        if (isLowStock) const SizedBox(width: 6),
-        if (isExpired) const Tooltip(message: 'Expired', child: Icon(Icons.block, color: Colors.red, size: 22))
-        else if (isExpiring) const Tooltip(message: 'Expiring Soon', child: Icon(Icons.timer, color: Colors.orange, size: 22)),
-      ],
+    if (!isLowStock && !isExpiring && !isExpired) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          if (isLowStock) 
+            _buildBadge(Icons.warning_amber_rounded, 'Low Stock', Colors.red.shade100, Colors.red.shade900),
+          if (isExpired) 
+            _buildBadge(Icons.block, 'Expired', Colors.red.shade100, Colors.red.shade900)
+          else if (isExpiring) 
+            _buildBadge(Icons.timer_outlined, 'Expiring Soon', Colors.orange.shade100, Colors.orange.shade900),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(IconData icon, String text, Color bgColor, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: textColor),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor)),
+        ],
+      ),
     );
   }
 
@@ -219,10 +268,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           builder: (BuildContext context, StateSetter setModalState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.85,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-              ),
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
               padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 15),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,10 +293,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onPressed: () async {
                           Navigator.pop(context);
                           final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => ItemFormScreen(
-                            preFillName: itemName, 
-                            preFillCategory: category, 
-                            preFillStockAlert: stockAlert, 
-                            preFillExpiryAlert: expiryAlertMonths
+                            preFillName: itemName, preFillCategory: category, preFillStockAlert: stockAlert, preFillExpiryAlert: expiryAlertMonths
                           )));
                           if (result == true) _loadData();
                         },
@@ -308,28 +351,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           margin: const EdgeInsets.only(bottom: 10),
                           child: ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                            leading: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-                              child: const Icon(Icons.calendar_month, color: Color(0xFF00796B)),
-                            ),
                             title: Text('Exp: ${batch['expiryDate']}', style: const TextStyle(fontWeight: FontWeight.bold)),
                             subtitle: Text('Qty: ${batch['quantity']}', style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 15)),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                // EDIT BUTTON
                                 IconButton(
                                   icon: const Icon(Icons.edit, color: Colors.blueAccent),
                                   onPressed: () async {
                                     Navigator.pop(context);
-                                    final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => ItemFormScreen(
-                                      batchToEdit: batch, // Pass the whole batch to edit mode
-                                    )));
+                                    final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => ItemFormScreen(batchToEdit: batch)));
                                     if (result == true) _loadData();
                                   },
                                 ),
-                                // DELETE BUTTON
                                 IconButton(
                                   icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                                   onPressed: () async {
@@ -357,93 +391,156 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(70),
-        child: AppBar(
-          elevation: 0,
-          backgroundColor: const Color(0xFF00796B),
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(20))),
-          title: const Text('Inventory Pro', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 24)),
-          centerTitle: true,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 28),
-              onPressed: _items.isEmpty ? null : _generatePdfReport,
+      body: Column(
+        children: [
+          // CUSTOM HEADER (Matches Screenshot)
+          Container(
+            padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 10, left: 16, right: 16, bottom: 16),
+            decoration: const BoxDecoration(
+              color: Color(0xFF80CBC4), // Light Teal matching the screenshot
             ),
-            const SizedBox(width: 10),
-          ],
-        ),
-      ),
-      body: _items.isEmpty 
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey.shade400),
-                  const SizedBox(height: 15),
-                  Text('No items found.', style: TextStyle(fontSize: 18, color: Colors.grey.shade600)),
-                ],
-              )
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                final item = _items[index];
-                return Card(
-                  elevation: 2,
-                  shadowColor: Colors.black12,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => _showItemDetails(item['name'], item['category'], item['stockAlert'], item['expiryAlertMonths']),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Container(
-                            height: 50, width: 50,
-                            decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(12)),
-                            child: const Icon(Icons.medication, color: Color(0xFF00796B), size: 28),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(child: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                                    _buildAlertIcons(item),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(item['category'], style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(color: const Color(0xFF00796B), borderRadius: BorderRadius.circular(12)),
-                            child: Text('${item['totalQty']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-                          ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    // Logo Image
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 55, height: 55,
+                        color: Colors.white,
+                        child: Image.asset(
+                          'assets/logo.jpg', 
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.local_hospital, color: Colors.teal, size: 30), // Fallback if logo not found
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Titles
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text('OT TRACKER PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.black87)),
+                          Text('Noor Alyemen Eye & E.N.T. Consulting Center', style: TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w500)),
                         ],
                       ),
                     ),
+                    // PDF Button
+                    IconButton(
+                      icon: const Icon(Icons.picture_as_pdf, color: Colors.black54, size: 28),
+                      onPressed: _filteredItems.isEmpty ? null : _generatePdfReport,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Search Bar
+                TextField(
+                  onChanged: (value) {
+                    _searchQuery = value;
+                    _applyFilters();
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search items inside theatre...',
+                    prefixIcon: const Icon(Icons.search, color: Colors.black54),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
-                );
-              },
+                ),
+                const SizedBox(height: 16),
+                // Category Chips
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _categories.map((category) {
+                      bool isSelected = _selectedCategory == category;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: ChoiceChip(
+                          label: Text(category, style: TextStyle(color: isSelected ? Colors.teal.shade900 : Colors.black87, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                          selected: isSelected,
+                          selectedColor: Colors.teal.shade100,
+                          backgroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: isSelected ? Colors.teal.shade300 : Colors.grey.shade300)),
+                          onSelected: (selected) {
+                            setState(() {
+                              _selectedCategory = category;
+                              _applyFilters();
+                            });
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF00796B),
+          ),
+          
+          // ITEM LIST
+          Expanded(
+            child: _filteredItems.isEmpty 
+              ? const Center(child: Text('No matching items found in the vault.', style: TextStyle(fontSize: 16, color: Colors.black87)))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _filteredItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _filteredItems[index];
+                    return Card(
+                      elevation: 2,
+                      shadowColor: Colors.black12,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _showItemDetails(item['name'], item['category'], item['stockAlert'], item['expiryAlertMonths']),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Container(
+                                height: 50, width: 50,
+                                decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(12)),
+                                child: const Icon(Icons.medication, color: Color(0xFF00796B), size: 28),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 2),
+                                    Text(item['category'], style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                                    _buildExplicitAlerts(item), // Replaced generic icons with Explicit Badges
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(color: const Color(0xFF00796B), borderRadius: BorderRadius.circular(12)),
+                                child: Text('${item['totalQty']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFF80CBC4),
         onPressed: () async {
           final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => const ItemFormScreen()));
           if (result == true) _loadData();
         },
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('New Item', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: const Icon(Icons.add, color: Colors.black87, size: 28),
       ),
     );
   }
@@ -457,7 +554,7 @@ class ItemFormScreen extends StatefulWidget {
   final String? preFillCategory;
   final int? preFillStockAlert;
   final int? preFillExpiryAlert;
-  final Map<String, dynamic>? batchToEdit; // If passed, screen acts as "Edit Mode"
+  final Map<String, dynamic>? batchToEdit;
 
   const ItemFormScreen({super.key, this.preFillName, this.preFillCategory, this.preFillStockAlert, this.preFillExpiryAlert, this.batchToEdit});
 
@@ -502,10 +599,8 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
 
     if (name.isNotEmpty && qty >= 0 && expiry.isNotEmpty) {
       if (widget.batchToEdit != null) {
-        // UPDATE EXISTING BATCH
         await DatabaseHelper.instance.updateBatchFull(widget.batchToEdit!['id'], name, qty, expiry, sAlert, eAlert);
       } else {
-        // ADD NEW ITEM OR BATCH
         final newItem = {
           'name': name,
           'category': category.isEmpty ? 'General' : category,
@@ -549,7 +644,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
                 children: [
                   TextField(
                     controller: _nameCtrl, 
-                    enabled: !isAddingBatch && !isEdit, // Lock name if editing or adding batch to keep grouping intact
+                    enabled: !isAddingBatch && !isEdit, 
                     decoration: InputDecoration(labelText: 'Item Name *', prefixIcon: const Icon(Icons.label_important), filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))
                   ),
                   const SizedBox(height: 15),
