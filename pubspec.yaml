@@ -1,5 +1,5 @@
 name: ot_tracker_pro
-description: Inventory Management App
+description: Professional Inventory App
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -14,6 +14,8 @@ dependencies:
   path: any
   pdf: any
   printing: any
+  flutter_barcode_scanner: any
+  share_plus: any
 
 dev_dependencies:
   flutter_test:
