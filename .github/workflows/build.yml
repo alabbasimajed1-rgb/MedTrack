@@ -17,8 +17,13 @@ jobs:
       # 1. Force the beautiful App Name
       - run: sed -i 's/android:label="ot_tracker_pro"/android:label="OT TRACKER PRO"/g' android/app/src/main/AndroidManifest.xml
       
-      # 2. Safely add Camera Permissions for the scanner
+      # 2. Safely add Camera Permissions
       - run: sed -i '/<application/i \    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
+      
+      # 3. Bulletproof Upgrades: Forces SDK 34 and Kotlin 1.9.22 for modern packages
+      - run: sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle
+      - run: sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
+      - run: sed -i -E 's/id "org.jetbrains.kotlin.android" version ".*" apply false/id "org.jetbrains.kotlin.android" version "1.9.22" apply false/g' android/settings.gradle
       
       - run: flutter pub get
       - run: flutter build apk --release
