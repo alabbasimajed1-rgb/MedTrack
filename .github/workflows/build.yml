@@ -20,10 +20,12 @@ jobs:
       # 2. Safely add Camera Permissions
       - run: sed -i '/<application/i \    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
       
-      # 3. Bulletproof Upgrades: Forces SDK 34 and Kotlin 1.9.22 for modern packages
+      # 3. Lock SDK to 34 (Avoids the Android 15 / SDK 36 server crash)
       - run: sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle
       - run: sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle
-      - run: sed -i -E 's/id "org.jetbrains.kotlin.android" version ".*" apply false/id "org.jetbrains.kotlin.android" version "1.9.22" apply false/g' android/settings.gradle
+      
+      # 4. Master Kotlin Override (Fixes the Duplicate Class error instantly)
+      - run: sed -i -E 's/version "1\.[0-9]+\.[0-9]+"/version "1.9.22"/g' android/settings.gradle || true
       
       - run: flutter pub get
       - run: flutter build apk --release
