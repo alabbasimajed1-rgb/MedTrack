@@ -11,7 +11,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.6'
-      - run: flutter create --platforms=android .
+          
+      # This line forces Flutter to ignore the "MedTrack" folder name and use lowercase
+      - run: flutter create --platforms=android --project-name ot_tracker_pro .
       
       - run: sed -i 's/android:label="ot_tracker_pro"/android:label="OT TRACKER PRO"/g' android/app/src/main/AndroidManifest.xml
       
