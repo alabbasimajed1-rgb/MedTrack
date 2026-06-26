@@ -4,7 +4,7 @@ import 'package:path/path.dart' hide context;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:flutter_barcode_scanner/flutter_barcode_scanner.dart';
+import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:share_plus/share_plus.dart';
 
 void main() => runApp(const OTTrackerProApp());
@@ -60,7 +60,6 @@ class DatabaseHelper {
           expiryAlertMonths INTEGER
         )
       ''');
-      // NEW TABLE: Audit Trail for Patient Linking
       await db.execute('''
         CREATE TABLE audit (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,7 +145,6 @@ class DatabaseHelper {
       }
     }
 
-    // Save to Audit Trail
     await db.insert('audit', {
       'itemName': itemName,
       'amount': amountToWithdraw,
@@ -207,10 +205,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _scanBarcodeForSearch() async {
     try {
-      String barcode = await FlutterBarcodeScanner.scanBarcode('#00796B', 'Cancel', true, ScanMode.BARCODE);
-      if (barcode != '-1' && mounted) {
+      var result = await BarcodeScanner.scan();
+      if (result.type == ResultType.Barcode && result.rawContent.isNotEmpty && mounted) {
         setState(() {
-          _searchCtrl.text = barcode;
+          _searchCtrl.text = result.rawContent;
           _applyFilters();
         });
       }
@@ -320,7 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final dbHelper = DatabaseHelper.instance;
     List<Map<String, dynamic>> batches = await dbHelper.getBatches(itemName);
     final withdrawCtrl = TextEditingController();
-    final patientIdCtrl = TextEditingController(); // NEW Patient ID Field
+    final patientIdCtrl = TextEditingController();
 
     if (!context.mounted) return;
 
@@ -365,7 +363,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
                 const Divider(height: 20),
-                // Audit Row
                 Row(
                   children: [
                     Expanded(
@@ -473,7 +470,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ClipRRect(borderRadius: BorderRadius.circular(8), child: Container(width: 50, height: 50, color: Colors.white, child: Image.asset('assets/logo.jpg', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.local_hospital, color: Colors.teal)))),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('OT TRACKER PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.black87)), Text('Noor Alyemen Eye Center', style: TextStyle(fontSize: 12, color: Colors.black87))])),
-                    // PROFESSIONAL MENU
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: Colors.black87),
                       onSelected: (value) {
@@ -618,8 +614,10 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
 
   Future<void> _scanBarcode() async {
     try {
-      String barcode = await FlutterBarcodeScanner.scanBarcode('#00796B', 'Cancel', true, ScanMode.BARCODE);
-      if (barcode != '-1' && mounted) setState(() => _barcodeCtrl.text = barcode);
+      var result = await BarcodeScanner.scan();
+      if (result.type == ResultType.Barcode && result.rawContent.isNotEmpty && mounted) {
+        setState(() => _barcodeCtrl.text = result.rawContent);
+      }
     } catch (e) {}
   }
 
