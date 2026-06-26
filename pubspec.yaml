@@ -14,7 +14,7 @@ dependencies:
   path: any
   pdf: any
   printing: any
-  flutter_barcode_scanner: any
+  barcode_scan2: any
   share_plus: any
 
 dev_dependencies:
