@@ -262,14 +262,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     List<List<String>> reportData = [];
     for (var item in _filteredItems) {
       final batches = await DatabaseHelper.instance.getBatches(item['name']);
-      List<String> activeExpiries = batches.where((b) => (b['quantity'] as int) > 0).map((b) => b['expiryDate'].toString()).toSet().toList();
+      
+      // PDF UPGRADE: Now shows the specific quantity next to each expiry date
+      List<String> activeExpiries = batches
+          .where((b) => (b['quantity'] as int) > 0)
+          .map((b) => "${b['expiryDate']} (Qty: ${b['quantity']})")
+          .toList();
+
       reportData.add([
         item['name'].toString(),
         item['category'].toString(),
         item['totalInitial'].toString(),
         item['totalConsumed'].toString(),
         item['totalQty'].toString(),
-        activeExpiries.isEmpty ? 'Fully Consumed' : activeExpiries.join(',\n')
+        activeExpiries.isEmpty ? 'Fully Consumed' : activeExpiries.join('\n')
       ]);
     }
 
@@ -302,7 +308,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 headerDecoration: pw.BoxDecoration(color: PdfColor.fromHex('#00796B')),
                 headerStyle: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 12),
                 cellStyle: const pw.TextStyle(fontSize: 11),
-                headers: ['Item Name', 'Category', 'Total Qty', 'Consumed', 'Remaining', 'Expiry Date(s)'],
+                headers: ['Item Name', 'Category', 'Total Qty', 'Consumed', 'Remaining', 'Expiry Date & Qty'],
                 data: reportData,
               ),
             ],
@@ -314,7 +320,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'OT_Tracker_Report.pdf');
   }
 
-  // RESTORED ALERT BADGE WIDGETS 
   Widget _buildExplicitAlerts(Map<String, dynamic> item) {
     int totalQty = item['totalQty'] as int;
     int stockAlert = (item['stockAlert'] ?? 10) as int;
@@ -529,7 +534,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     ClipRRect(borderRadius: BorderRadius.circular(8), child: Container(width: 50, height: 50, color: Colors.white, child: Image.asset('assets/logo.jpg', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.local_hospital, color: Colors.teal)))),
                     const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('OT TRACKER PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.black87)), Text('Noor Alyemen Eye Center', style: TextStyle(fontSize: 12, color: Colors.black87))])),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('OT TRACKER PRO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.black87)), Text('Noor Alyemen Eye & E.N.T. Consulting Center', style: TextStyle(fontSize: 12, color: Colors.black87))])),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: Colors.black87),
                       onSelected: (value) {
@@ -604,7 +609,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 Text(item['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: isZero ? Colors.grey : Colors.black), maxLines: 1, overflow: TextOverflow.ellipsis),
                                 const SizedBox(height: 2),
                                 Text(item['category'], style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                                _buildExplicitAlerts(item), // ALERTS RESTORED HERE!
+                                _buildExplicitAlerts(item),
                               ],
                             ),
                           ),
@@ -740,7 +745,22 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
                 ],
               ),
             ),
+            
+            // ALERT SETTINGS RESTORED HERE
             const SizedBox(height: 20),
+            const Text('  Alert Settings (Syncs across all batches)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(child: TextField(controller: _stockAlertCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Min Qty Alert', prefixIcon: const Icon(Icons.warning, color: Colors.orange), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)))),
+                const SizedBox(width: 10),
+                Expanded(child: TextField(controller: _expiryAlertCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Months Alert', prefixIcon: const Icon(Icons.timer, color: Colors.blueAccent), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)))),
+              ],
+            ),
+            
+            const SizedBox(height: 20),
+            const Text('  Batch Details', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, spreadRadius: 2)]),
               child: Column(
