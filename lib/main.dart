@@ -26,7 +26,7 @@ class OTTrackerProApp extends StatelessWidget {
 }
 
 // ==========================================
-// 1. Database Engine
+// 1. Database Engine (Upgraded to v5 for Consumption Tracking)
 // ==========================================
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -36,7 +36,7 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('ot_tracker_v4.db');
+    _database = await _initDB('ot_tracker_v5.db'); // Upgraded Database
     return _database!;
   }
 
@@ -44,8 +44,18 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
     return await openDatabase(path, version: 1, onCreate: (db, v) async {
-      await db.execute(
-          'CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, quantity INTEGER, stockAlert INTEGER, expiryDate TEXT, expiryAlertMonths INTEGER)');
+      await db.execute('''
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, 
+          name TEXT, 
+          category TEXT, 
+          initialQuantity INTEGER, 
+          quantity INTEGER, 
+          stockAlert INTEGER, 
+          expiryDate TEXT, 
+          expiryAlertMonths INTEGER
+        )
+      ''');
     });
   }
 
@@ -56,7 +66,9 @@ class DatabaseHelper {
 
   Future<void> updateBatchFull(int id, String itemName, int qty, String expiry, int stockAlert, int expiryAlertMonths) async {
     final db = await instance.database;
+    // When editing manually, we reset initialQuantity to match the new qty to prevent consumption math errors
     await db.update('items', {
+      'initialQuantity': qty,
       'quantity': qty,
       'expiryDate': expiry,
       'stockAlert': stockAlert,
@@ -78,12 +90,13 @@ class DatabaseHelper {
     final db = await instance.database;
     return await db.rawQuery('''
       SELECT name, category, 
+             SUM(initialQuantity) as totalInitial,
+             SUM(initialQuantity - quantity) as totalConsumed,
              SUM(quantity) as totalQty, 
-             MIN(expiryDate) as nearestExpiry, 
+             MIN(CASE WHEN quantity > 0 THEN expiryDate ELSE NULL END) as nearestExpiry, 
              MAX(stockAlert) as stockAlert, 
              MAX(expiryAlertMonths) as expiryAlertMonths
       FROM items 
-      WHERE quantity > 0
       GROUP BY name 
       ORDER BY name ASC
     ''');
@@ -91,7 +104,7 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getBatches(String name) async {
     final db = await instance.database;
-    return await db.query('items', where: 'name = ? AND quantity > 0', whereArgs: [name], orderBy: 'expiryDate ASC');
+    return await db.query('items', where: 'name = ?', whereArgs: [name], orderBy: 'expiryDate ASC');
   }
 
   Future<void> withdrawItemSmart(String itemName, int amountToWithdraw) async {
@@ -116,7 +129,7 @@ class DatabaseHelper {
 }
 
 // ==========================================
-// 2. Main Dashboard (Search & Categories UI)
+// 2. Main Dashboard & Advanced PDF Report
 // ==========================================
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -141,7 +154,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadData() async {
     final data = await DatabaseHelper.instance.getGroupedItems();
     
-    // Extract unique categories for the top chips
     Set<String> uniqueCategories = {'All'};
     for (var item in data) {
       String cat = item['category'].toString().trim();
@@ -167,46 +179,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  // EXACT MATCH FOR YOUR REQUESTED PDF DESIGN
   Future<void> _generatePdfReport() async {
     final pdf = pw.Document();
+    final String currentDate = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')} ${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape, // Landscape orientation
+        margin: const pw.EdgeInsets.all(30),
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('OT TRACKER PRO - Inventory Report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 20),
-              pw.TableHelper.fromTextArray(
-                context: context,
-                headers: ['Item Name', 'Category', 'Quantity', 'Nearest Expiry'],
-                data: _filteredItems.map((item) => [
-                  item['name'].toString(),
-                  item['category'].toString(),
-                  item['totalQty'].toString(),
-                  item['nearestExpiry'].toString()
-                ]).toList(),
-              ),
-            ],
-          );
+          return [
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Noor Alyemen Eye & E.N.T. Consulting Center', style: pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
+                pw.SizedBox(height: 5),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('OT-Tracker Pro - Official Inventory Report', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#00796B'))),
+                    pw.Text('Report Date: $currentDate', style: pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+                  ]
+                ),
+                pw.SizedBox(height: 5),
+                pw.Divider(color: PdfColor.fromHex('#00796B'), thickness: 2),
+                pw.SizedBox(height: 15),
+                pw.TableHelper.fromTextArray(
+                  context: context,
+                  cellAlignment: pw.Alignment.centerLeft,
+                  headerDecoration: pw.BoxDecoration(color: PdfColor.fromHex('#00796B')),
+                  headerStyle: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 12),
+                  cellStyle: const pw.TextStyle(fontSize: 11),
+                  rowDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
+                  headers: ['Item Name', 'Category', 'Total Qty', 'Consumed', 'Remaining', 'Expiry Date'],
+                  data: _filteredItems.map((item) => [
+                    item['name'].toString(),
+                    item['category'].toString(),
+                    item['totalInitial'].toString(),
+                    item['totalConsumed'].toString(),
+                    item['totalQty'].toString(),
+                    item['nearestExpiry']?.toString() ?? 'Fully Consumed'
+                  ]).toList(),
+                ),
+              ],
+            )
+          ];
         },
+        footer: (pw.Context context) {
+          return pw.Container(
+            alignment: pw.Alignment.centerRight,
+            margin: const pw.EdgeInsets.only(top: 10),
+            child: pw.Text('Generated via OT-Tracker Pro.', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey)),
+          );
+        }
       ),
     );
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'OT_Tracker_Report.pdf');
   }
 
-  // Explicit Text Badges for Alerts
   Widget _buildExplicitAlerts(Map<String, dynamic> item) {
     int totalQty = item['totalQty'] as int;
     int stockAlert = item['stockAlert'] as int;
     int alertMonths = item['expiryAlertMonths'] as int;
     String? nearestExpiry = item['nearestExpiry'];
 
-    bool isLowStock = totalQty <= stockAlert;
+    bool isOutOfStock = totalQty == 0;
+    bool isLowStock = totalQty > 0 && totalQty <= stockAlert;
     bool isExpiring = false;
     bool isExpired = false;
 
-    if (nearestExpiry != null) {
+    if (nearestExpiry != null && nearestExpiry != 'null') {
       try {
         DateTime expDate = DateTime.parse(nearestExpiry);
         int daysLeft = expDate.difference(DateTime.now()).inDays;
@@ -218,7 +262,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       } catch (_) {}
     }
 
-    if (!isLowStock && !isExpiring && !isExpired) return const SizedBox.shrink();
+    if (!isOutOfStock && !isLowStock && !isExpiring && !isExpired) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.only(top: 8.0),
@@ -226,12 +270,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         spacing: 8,
         runSpacing: 4,
         children: [
+          if (isOutOfStock)
+            _buildBadge(Icons.block, 'Out of Stock', Colors.red.shade100, Colors.red.shade900),
           if (isLowStock) 
-            _buildBadge(Icons.warning_amber_rounded, 'Low Stock', Colors.red.shade100, Colors.red.shade900),
-          if (isExpired) 
-            _buildBadge(Icons.block, 'Expired', Colors.red.shade100, Colors.red.shade900)
-          else if (isExpiring) 
-            _buildBadge(Icons.timer_outlined, 'Expiring Soon', Colors.orange.shade100, Colors.orange.shade900),
+            _buildBadge(Icons.warning_amber_rounded, 'Low Stock', Colors.orange.shade100, Colors.orange.shade900),
+          if (isExpired && !isOutOfStock) 
+            _buildBadge(Icons.error_outline, 'Expired', Colors.red.shade100, Colors.red.shade900)
+          else if (isExpiring && !isOutOfStock) 
+            _buildBadge(Icons.timer_outlined, 'Expiring Soon', Colors.blue.shade100, Colors.blue.shade900),
         ],
       ),
     );
@@ -344,15 +390,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       itemCount: batches.length,
                       itemBuilder: (context, index) {
                         final batch = batches[index];
+                        final bool isZero = batch['quantity'] == 0;
                         return Card(
                           elevation: 0,
-                          color: Colors.teal.shade50,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: BorderSide(color: Colors.teal.shade100)),
+                          color: isZero ? Colors.grey.shade100 : Colors.teal.shade50,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: BorderSide(color: isZero ? Colors.grey.shade300 : Colors.teal.shade100)),
                           margin: const EdgeInsets.only(bottom: 10),
                           child: ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                            title: Text('Exp: ${batch['expiryDate']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Qty: ${batch['quantity']}', style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 15)),
+                            title: Text('Exp: ${batch['expiryDate']}', style: TextStyle(fontWeight: FontWeight.bold, decoration: isZero ? TextDecoration.lineThrough : null, color: isZero ? Colors.grey : Colors.black)),
+                            subtitle: Text('Qty: ${batch['quantity']} / ${batch['initialQuantity']}', style: TextStyle(color: isZero ? Colors.grey : Colors.teal, fontWeight: FontWeight.bold, fontSize: 15)),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -393,31 +440,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // CUSTOM HEADER (Matches Screenshot)
           Container(
             padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 10, left: 16, right: 16, bottom: 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFF80CBC4), // Light Teal matching the screenshot
-            ),
+            decoration: const BoxDecoration(color: Color(0xFF80CBC4)),
             child: Column(
               children: [
                 Row(
                   children: [
-                    // Logo Image
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
-                        width: 55, height: 55,
-                        color: Colors.white,
-                        child: Image.asset(
-                          'assets/logo.jpg', 
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.local_hospital, color: Colors.teal, size: 30), // Fallback if logo not found
-                        ),
+                        width: 55, height: 55, color: Colors.white,
+                        child: Image.asset('assets/logo.jpg', fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => const Icon(Icons.local_hospital, color: Colors.teal, size: 30)),
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Titles
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -427,7 +464,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                     ),
-                    // PDF Button
                     IconButton(
                       icon: const Icon(Icons.picture_as_pdf, color: Colors.black54, size: 28),
                       onPressed: _filteredItems.isEmpty ? null : _generatePdfReport,
@@ -435,7 +471,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Search Bar
                 TextField(
                   onChanged: (value) {
                     _searchQuery = value;
@@ -444,14 +479,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   decoration: InputDecoration(
                     hintText: 'Search items inside theatre...',
                     prefixIcon: const Icon(Icons.search, color: Colors.black54),
-                    filled: true,
-                    fillColor: Colors.white,
+                    filled: true, fillColor: Colors.white,
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Category Chips
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -480,7 +513,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           
-          // ITEM LIST
           Expanded(
             child: _filteredItems.isEmpty 
               ? const Center(child: Text('No matching items found in the vault.', style: TextStyle(fontSize: 16, color: Colors.black87)))
@@ -489,6 +521,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   itemCount: _filteredItems.length,
                   itemBuilder: (context, index) {
                     final item = _filteredItems[index];
+                    final bool isZero = item['totalQty'] == 0;
                     return Card(
                       elevation: 2,
                       shadowColor: Colors.black12,
@@ -503,25 +536,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               Container(
                                 height: 50, width: 50,
-                                decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(12)),
-                                child: const Icon(Icons.medication, color: Color(0xFF00796B), size: 28),
+                                decoration: BoxDecoration(color: isZero ? Colors.grey.shade200 : Colors.teal.shade50, borderRadius: BorderRadius.circular(12)),
+                                child: Icon(Icons.medication, color: isZero ? Colors.grey : const Color(0xFF00796B), size: 28),
                               ),
                               const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    Text(item['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: isZero ? Colors.grey : Colors.black), maxLines: 1, overflow: TextOverflow.ellipsis),
                                     const SizedBox(height: 2),
                                     Text(item['category'], style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                                    _buildExplicitAlerts(item), // Replaced generic icons with Explicit Badges
+                                    _buildExplicitAlerts(item),
                                   ],
                                 ),
                               ),
                               const SizedBox(width: 10),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                decoration: BoxDecoration(color: const Color(0xFF00796B), borderRadius: BorderRadius.circular(12)),
+                                decoration: BoxDecoration(color: isZero ? Colors.grey : const Color(0xFF00796B), borderRadius: BorderRadius.circular(12)),
                                 child: Text('${item['totalQty']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
                               ),
                             ],
@@ -604,6 +637,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
         final newItem = {
           'name': name,
           'category': category.isEmpty ? 'General' : category,
+          'initialQuantity': qty, // NEW tracking feature
           'quantity': qty,
           'stockAlert': sAlert,
           'expiryDate': expiry,
