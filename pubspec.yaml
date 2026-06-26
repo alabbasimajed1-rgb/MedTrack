@@ -14,8 +14,8 @@ dependencies:
   path: any
   pdf: any
   printing: any
-  barcode_scan2: 4.2.2
-  share_plus: 7.2.2
+  barcode_scan2: any
+  share_plus: any
 
 dev_dependencies:
   flutter_test:
