@@ -15,7 +15,7 @@ class OTTrackerProApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'OT-Tracker Pro',
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF00796B), // لون طبي/احترافي
+        colorSchemeSeed: const Color(0xFF00796B), // Professional Teal Color
         useMaterial3: true,
       ),
       home: const DashboardScreen(),
@@ -51,7 +51,7 @@ class DatabaseHelper {
     return await db.insert('items', row);
   }
 
-  // تجميع الأصناف مع جلب أصغر تاريخ انتهاء وأعلى حد تنبيه
+  // Group items and fetch nearest expiry and max alerts
   Future<List<Map<String, dynamic>>> getGroupedItems() async {
     final db = await instance.database;
     return await db.rawQuery('''
@@ -116,7 +116,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _items = data);
   }
 
-  // إنشاء ومشاركة تقرير PDF
+  // Generate and Share PDF Report
   Future<void> _generatePdfReport() async {
     final pdf = pw.Document();
     
@@ -146,7 +146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'Inventory_Report.pdf');
   }
 
-  // حساب حالة الإشعارات
+  // Calculate Alert Status Icons
   Widget _buildAlertIcons(Map<String, dynamic> item) {
     int totalQty = item['totalQty'] as int;
     int stockAlert = item['stockAlert'] as int;
@@ -185,6 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     List<Map<String, dynamic>> batches = await dbHelper.getBatches(itemName);
     final withdrawCtrl = TextEditingController();
     
+    // Safety check to prevent context errors on async gaps
     if (!context.mounted) return;
 
     showModalBottomSheet(
@@ -205,7 +206,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(child: Text(itemName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF00796B)))),
-                        // زر إضافة كمية لاحقة (دفعة جديدة)
+                        
+                        // Add Subsequent Quantity (New Batch) Button
                         IconButton(
                           icon: const Icon(Icons.add_circle, color: Colors.teal, size: 30),
                           tooltip: 'Add New Batch',
@@ -380,7 +382,12 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _categoryCtrl.dispose(); _qtyCtrl.dispose(); _expiryCtrl.dispose(); _stockAlertCtrl.dispose(); _expiryAlertCtrl.dispose();
+    _nameCtrl.dispose(); 
+    _categoryCtrl.dispose(); 
+    _qtyCtrl.dispose(); 
+    _expiryCtrl.dispose(); 
+    _stockAlertCtrl.dispose(); 
+    _expiryAlertCtrl.dispose();
     super.dispose();
   }
 
