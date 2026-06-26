@@ -17,18 +17,8 @@ jobs:
       # 1. Force the beautiful App Name
       - run: sed -i 's/android:label="ot_tracker_pro"/android:label="OT TRACKER PRO"/g' android/app/src/main/AndroidManifest.xml
       
-      # 2. Add Camera Permissions
+      # 2. Safely add Camera Permissions for the scanner
       - run: sed -i '/<application/i \    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
-      
-      # 3. Upgrade Android Compile SDK to 34 (Corrected!)
-      - run: sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
-      
-      # 4. Upgrade Android Minimum SDK to 21
-      - run: sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
-      
-      # 5. Upgrade Kotlin safely to stop the "Duplicate Class" crash
-      - run: sed -i 's/1.7.10/1.9.22/g' android/settings.gradle
-      - run: sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.22"/g' android/build.gradle || true
       
       - run: flutter pub get
       - run: flutter build apk --release
