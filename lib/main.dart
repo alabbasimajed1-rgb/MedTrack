@@ -314,6 +314,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'OT_Tracker_Report.pdf');
   }
 
+  // RESTORED ALERT BADGE WIDGETS 
+  Widget _buildExplicitAlerts(Map<String, dynamic> item) {
+    int totalQty = item['totalQty'] as int;
+    int stockAlert = (item['stockAlert'] ?? 10) as int;
+    int alertMonths = (item['expiryAlertMonths'] ?? 3) as int;
+    String? nearestExpiry = item['nearestExpiry'];
+
+    bool isOutOfStock = totalQty == 0;
+    bool isLowStock = totalQty > 0 && totalQty <= stockAlert;
+    bool isExpiring = false;
+    bool isExpired = false;
+
+    if (nearestExpiry != null && nearestExpiry != 'null') {
+      try {
+        DateTime expDate = DateTime.parse(nearestExpiry);
+        int daysLeft = expDate.difference(DateTime.now()).inDays;
+        if (daysLeft < 0) {
+          isExpired = true;
+        } else if (daysLeft <= (alertMonths * 30)) {
+          isExpiring = true;
+        }
+      } catch (_) {}
+    }
+
+    if (!isOutOfStock && !isLowStock && !isExpiring && !isExpired) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          if (isOutOfStock)
+            _buildBadge(Icons.block, 'Out of Stock', Colors.red.shade100, Colors.red.shade900),
+          if (isLowStock) 
+            _buildBadge(Icons.warning_amber_rounded, 'Low Stock', Colors.orange.shade100, Colors.orange.shade900),
+          if (isExpired && !isOutOfStock) 
+            _buildBadge(Icons.error_outline, 'Expired', Colors.red.shade100, Colors.red.shade900)
+          else if (isExpiring && !isOutOfStock) 
+            _buildBadge(Icons.timer_outlined, 'Expiring Soon', Colors.blue.shade100, Colors.blue.shade900),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(IconData icon, String text, Color bgColor, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: textColor),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor)),
+        ],
+      ),
+    );
+  }
+
   void _showItemDetails(String itemName, String category, int stockAlert, int expiryAlertMonths) async {
     final dbHelper = DatabaseHelper.instance;
     List<Map<String, dynamic>> batches = await dbHelper.getBatches(itemName);
@@ -544,6 +604,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 Text(item['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: isZero ? Colors.grey : Colors.black), maxLines: 1, overflow: TextOverflow.ellipsis),
                                 const SizedBox(height: 2),
                                 Text(item['category'], style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                                _buildExplicitAlerts(item), // ALERTS RESTORED HERE!
                               ],
                             ),
                           ),
