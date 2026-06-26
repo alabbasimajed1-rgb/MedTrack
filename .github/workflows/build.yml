@@ -13,8 +13,11 @@ jobs:
           flutter-version: '3.x'
       - run: flutter create --platforms=android .
       
-      # This command magically forces the Android Home Screen name to be capitalized
+      # Forces the Home Screen Name to OT TRACKER PRO
       - run: sed -i 's/android:label="ot_tracker_pro"/android:label="OT TRACKER PRO"/g' android/app/src/main/AndroidManifest.xml
+      
+      # Safely injects Android Camera Permission for the Barcode Scanner
+      - run: sed -i '/<application/i \    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
       
       - run: flutter pub get
       - run: flutter build apk --release
